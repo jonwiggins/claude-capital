@@ -3,6 +3,7 @@
 from .wallet import WalletManager, encrypt_private_key, create_new_wallet
 from .exchanges import ExchangeConnector, ExchangeManager
 from .risk import RiskValidator, PortfolioRiskAnalyzer, CircuitBreaker
+from .mock_exchange import MockExchange, MockExchangeConnector
 
 __all__ = [
     'WalletManager',
@@ -12,5 +13,7 @@ __all__ = [
     'ExchangeManager',
     'RiskValidator',
     'PortfolioRiskAnalyzer',
-    'CircuitBreaker'
+    'CircuitBreaker',
+    'MockExchange',
+    'MockExchangeConnector'
 ]

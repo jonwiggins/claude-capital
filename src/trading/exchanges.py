@@ -350,21 +350,28 @@ class ExchangeManager:
         self.testnet = testnet
         self.exchanges: Dict[str, ExchangeConnector] = {}
 
-    def add_exchange(self, exchange_name: str) -> ExchangeConnector:
+    def add_exchange(self, exchange_name: str, initial_balance: float = 10000.0) -> Any:
         """
         Add an exchange connection.
 
         Args:
-            exchange_name: Name of the exchange
+            exchange_name: Name of the exchange ('mock' for paper trading)
+            initial_balance: Initial USDT balance for mock exchange
 
         Returns:
             Exchange connector instance
         """
         if exchange_name not in self.exchanges:
-            self.exchanges[exchange_name] = ExchangeConnector(
-                exchange_name,
-                testnet=self.testnet
-            )
+            if exchange_name == 'mock':
+                # Use mock exchange for paper trading
+                from .mock_exchange import MockExchangeConnector
+                self.exchanges[exchange_name] = MockExchangeConnector(initial_balance)
+            else:
+                # Use real exchange connector
+                self.exchanges[exchange_name] = ExchangeConnector(
+                    exchange_name,
+                    testnet=self.testnet
+                )
         return self.exchanges[exchange_name]
 
     def get_exchange(self, exchange_name: str) -> Optional[ExchangeConnector]:

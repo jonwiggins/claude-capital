@@ -236,20 +236,38 @@ class TradingTools:
 
     def research_topic(self, topic: str) -> Dict[str, Any]:
         """
-        Research a topic (placeholder for now).
+        Research a topic using web search and analysis.
 
-        In production, this could integrate with web search, news APIs, etc.
+        Args:
+            topic: Research topic
+
+        Returns:
+            Research findings
         """
         self.logger.info(f"Research request: {topic}")
         self.actions_taken.append(f"researched_{topic[:30]}")
 
-        # For now, return a placeholder
-        return {
-            "topic": topic,
-            "findings": "Research functionality to be implemented. "
-                       "Consider using web search, news APIs, or on-chain data.",
-            "sources": []
-        }
+        try:
+            from tools.research import ResearchTools
+            research_tools = ResearchTools()
+            findings = research_tools.research_topic(topic)
+
+            # Log research note
+            self.state_manager.add_research_note(
+                topic=topic,
+                findings=str(findings.get('sentiment', {}) if 'sentiment' in findings else findings)[:500],
+                action_taken="Conducted web research"
+            )
+
+            return findings
+
+        except Exception as e:
+            self.logger.error(f"Error conducting research: {e}")
+            return {
+                "topic": topic,
+                "error": str(e),
+                "suggestion": "Check TAVILY_API_KEY in .env for web search capabilities"
+            }
 
 
 class ClaudeSession:
@@ -298,38 +316,213 @@ class ClaudeSession:
 
     def run(self, context: str) -> Dict[str, Any]:
         """
-        Run a Claude trading session.
+        Run a Claude trading session with full tool calling.
 
         Args:
             context: Context/prompt for Claude
 
         Returns:
-            Session result
+            Session result with actions and next priorities
         """
         self.logger.info("Starting Claude session...")
-
-        # For now, return a simulated response
-        # In production, this would invoke Claude API with tool use
-        self.logger.info("=" * 80)
-        self.logger.info("CLAUDE CONTEXT:")
-        self.logger.info(context)
         self.logger.info("=" * 80)
 
-        # Simulate Claude thinking
-        self.logger.info("Claude is analyzing the trading situation...")
+        # Initialize conversation
+        messages = [{"role": "user", "content": context}]
 
-        # Example: Claude could analyze markets, make trades, etc.
-        # For now, just return placeholder actions
-        result = {
-            "actions": self.tools.actions_taken,
-            "next_priorities": [
-                "Monitor market conditions for entry opportunities",
-                "Research correlation between BTC and major indices",
-                "Develop momentum-based trading strategy"
-            ]
+        max_turns = 15  # Prevent infinite loops
+        turn_count = 0
+
+        try:
+            while turn_count < max_turns:
+                turn_count += 1
+                self.logger.info(f"Turn {turn_count}/{max_turns}")
+
+                # Call Claude with tools
+                response = self.client.messages.create(
+                    model="claude-sonnet-4-5-20250929",
+                    max_tokens=8000,
+                    messages=messages,
+                    tools=TRADING_TOOLS,
+                    temperature=1.0
+                )
+
+                # Add assistant response to conversation
+                assistant_content = response.content
+                messages.append({
+                    "role": "assistant",
+                    "content": assistant_content
+                })
+
+                # Check if Claude wants to use tools
+                tool_use_blocks = [
+                    block for block in response.content
+                    if hasattr(block, 'type') and block.type == "tool_use"
+                ]
+
+                if not tool_use_blocks:
+                    # Claude is done, extract final response
+                    self.logger.info("Claude session complete")
+
+                    # Extract text content
+                    text_blocks = [
+                        block.text for block in response.content
+                        if hasattr(block, 'type') and block.type == "text"
+                    ]
+                    final_text = "\n".join(text_blocks)
+
+                    # Log Claude's final thoughts
+                    self.logger.info("=" * 80)
+                    self.logger.info("CLAUDE'S FINAL RESPONSE:")
+                    self.logger.info(final_text)
+                    self.logger.info("=" * 80)
+
+                    # Extract next priorities
+                    next_priorities = self._extract_priorities(final_text)
+
+                    return {
+                        "actions": self.tools.actions_taken,
+                        "next_priorities": next_priorities,
+                        "final_response": final_text,
+                        "turns": turn_count
+                    }
+
+                # Execute tools
+                self.logger.info(f"Claude requested {len(tool_use_blocks)} tool(s)")
+                tool_results = []
+
+                for tool_use in tool_use_blocks:
+                    tool_name = tool_use.name
+                    tool_input = tool_use.input
+                    tool_use_id = tool_use.id
+
+                    self.logger.info(f"Executing tool: {tool_name}")
+                    self.logger.debug(f"  Input: {tool_input}")
+
+                    # Execute the tool
+                    result = self._execute_tool(tool_name, tool_input)
+
+                    self.logger.info(f"  Result: {str(result)[:200]}...")
+
+                    # Add tool result
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": str(result)
+                    })
+
+                # Add tool results to conversation
+                messages.append({
+                    "role": "user",
+                    "content": tool_results
+                })
+
+            # Max turns reached
+            self.logger.warning(f"Max turns ({max_turns}) reached, ending session")
+            return {
+                "actions": self.tools.actions_taken,
+                "next_priorities": ["Continue analysis from previous session"],
+                "final_response": "Session ended (max turns reached)",
+                "turns": turn_count
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error in Claude session: {e}", exc_info=True)
+            return {
+                "actions": self.tools.actions_taken,
+                "next_priorities": ["Investigate session error and retry"],
+                "error": str(e),
+                "turns": turn_count
+            }
+
+    def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> Any:
+        """
+        Execute a trading tool.
+
+        Args:
+            tool_name: Name of the tool
+            tool_input: Tool input parameters
+
+        Returns:
+            Tool execution result
+        """
+        tool_map = {
+            "get_current_price": self.tools.get_current_price,
+            "get_market_data": self.tools.get_market_data,
+            "execute_trade": self.tools.execute_trade,
+            "analyze_performance": self.tools.analyze_performance,
+            "log_decision": self.tools.log_decision,
+            "research_topic": self.tools.research_topic
         }
 
-        return result
+        tool_func = tool_map.get(tool_name)
+        if not tool_func:
+            return {"error": f"Unknown tool: {tool_name}"}
+
+        try:
+            return tool_func(**tool_input)
+        except Exception as e:
+            self.logger.error(f"Error executing {tool_name}: {e}")
+            return {"error": str(e)}
+
+    def _extract_priorities(self, text: str) -> List[str]:
+        """
+        Extract next priorities from Claude's response.
+
+        Args:
+            text: Claude's final response text
+
+        Returns:
+            List of priorities
+        """
+        priorities = []
+
+        # Look for common patterns
+        lines = text.split('\n')
+        in_priorities_section = False
+
+        for line in lines:
+            line = line.strip()
+
+            # Check for priority section headers
+            if any(keyword in line.lower() for keyword in [
+                'next priority', 'next session', 'priorities for next',
+                'next steps', 'for next time', 'next iteration'
+            ]):
+                in_priorities_section = True
+                continue
+
+            # Extract numbered or bulleted items
+            if in_priorities_section and line:
+                # Remove common prefixes
+                for prefix in ['- ', '* ', '• ']:
+                    if line.startswith(prefix):
+                        line = line[len(prefix):].strip()
+                        break
+
+                # Remove numbering (1. 2. etc)
+                if line and line[0].isdigit() and len(line) > 2 and line[1] in '.):':
+                    line = line[2:].strip()
+
+                if line and len(line) > 10:  # Reasonable priority length
+                    priorities.append(line)
+
+                    if len(priorities) >= 5:  # Max 5 priorities
+                        break
+
+            # Stop if we hit another section
+            if in_priorities_section and line.startswith('#'):
+                break
+
+        # Default priorities if none found
+        if not priorities:
+            priorities = [
+                "Monitor current market conditions",
+                "Analyze portfolio performance",
+                "Research new trading opportunities"
+            ]
+
+        return priorities[:5]  # Max 5 priorities
 
 
 # Tool definitions for Claude API (when using actual Claude Code integration)
