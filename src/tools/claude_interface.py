@@ -31,9 +31,18 @@ class TradingTools:
         self.logger = logger
         self.actions_taken = []
 
-    def get_current_price(self, symbol: str, exchange: str = "binance") -> Dict[str, Any]:
+    def get_current_price(self, symbol: str, exchange: Optional[str] = None) -> Dict[str, Any]:
         """Get current price for a trading pair."""
         try:
+            # Auto-detect exchange if not specified
+            if exchange is None:
+                if self.exchange_manager.get_exchange('mock'):
+                    exchange = 'mock'
+                elif self.exchange_manager.get_exchange('binance'):
+                    exchange = 'binance'
+                else:
+                    return {"error": "No exchange available"}
+
             exchange_conn = self.exchange_manager.get_exchange(exchange)
             if not exchange_conn:
                 return {"error": f"Exchange {exchange} not connected"}
@@ -54,10 +63,19 @@ class TradingTools:
         symbol: str,
         timeframe: str = "1h",
         limit: int = 100,
-        exchange: str = "binance"
+        exchange: Optional[str] = None
     ) -> Dict[str, Any]:
         """Get OHLCV market data."""
         try:
+            # Auto-detect exchange if not specified
+            if exchange is None:
+                if self.exchange_manager.get_exchange('mock'):
+                    exchange = 'mock'
+                elif self.exchange_manager.get_exchange('binance'):
+                    exchange = 'binance'
+                else:
+                    return {"error": "No exchange available"}
+
             exchange_conn = self.exchange_manager.get_exchange(exchange)
             if not exchange_conn:
                 return {"error": f"Exchange {exchange} not connected"}
@@ -82,7 +100,7 @@ class TradingTools:
         size: float,
         order_type: str = "market",
         price: Optional[float] = None,
-        exchange: str = "binance",
+        exchange: Optional[str] = None,
         strategy: str = "manual"
     ) -> Dict[str, Any]:
         """
@@ -103,6 +121,16 @@ class TradingTools:
         try:
             # Get current state
             state = self.state_manager.load()
+
+            # Determine exchange if not specified
+            if exchange is None:
+                # Use mock exchange if available, otherwise binance
+                if self.exchange_manager.get_exchange('mock'):
+                    exchange = 'mock'
+                elif self.exchange_manager.get_exchange('binance'):
+                    exchange = 'binance'
+                else:
+                    return {"error": "No exchange available"}
 
             # Get current price if not provided
             if price is None:
@@ -300,6 +328,13 @@ class ClaudeSession:
         # Add configured exchanges
         if os.getenv('BINANCE_API_KEY'):
             self.exchange_manager.add_exchange('binance')
+            self.logger.info("Connected to Binance exchange")
+        else:
+            # Use mock exchange for testing
+            state = self.state_manager.load()
+            initial_balance = state['capital'].get('initial_usd', 10000.0)
+            self.exchange_manager.add_exchange('mock', initial_balance=initial_balance)
+            self.logger.info(f"Using mock exchange (paper trading mode)")
 
         # Initialize risk validator
         state = self.state_manager.load()

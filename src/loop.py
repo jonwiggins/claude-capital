@@ -143,11 +143,20 @@ class TradingLoop:
             # Add configured exchanges
             if os.getenv('BINANCE_API_KEY'):
                 exchange_manager.add_exchange('binance')
+                self.logger.info("Connected to Binance exchange")
+            else:
+                # Use mock exchange for testing when no API keys
+                initial_balance = state['capital'].get('initial_usd', 10000.0)
+                exchange_manager.add_exchange('mock', initial_balance=initial_balance)
+                self.logger.info(f"Using mock exchange with ${initial_balance:,.2f} initial balance")
+                self.logger.info("⚠️  Paper trading mode - no real trades will be executed")
 
             # Update position prices and unrealized P&L
             for position in state['positions']:
                 try:
-                    exchange_name = position.get('exchange', 'binance')
+                    # Use mock exchange if no API keys
+                    default_exchange = 'binance' if os.getenv('BINANCE_API_KEY') else 'mock'
+                    exchange_name = position.get('exchange', default_exchange)
                     exchange = exchange_manager.get_exchange(exchange_name)
 
                     if exchange:
